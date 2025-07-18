@@ -5,7 +5,7 @@
 }
 
 body {
-    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace;
+    font-family: 'IBM Plex Mono', 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace;
     background: #1d2021;
     color: #ebdbb2;
     height: 100vh;
@@ -163,7 +163,7 @@ body {
     padding: 1rem;
     font-size: 0.8125rem;
     line-height: 1.6;
-    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace;
+    font-family: 'IBM Plex Mono', 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace;
 }
 
 .log-container.active {
