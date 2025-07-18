@@ -431,14 +431,13 @@
                         e.preventDefault();
                         showSearch();
                         break;
-                    case 't':
-                        e.preventDefault();
-                        toggleTimestamps();
-                        break;
+                    case 'b':
+                      e.preventDefault();
+                      toggleTimestamps();
+                      break;
                 }
             }
             
-            // Tab switching with numbers
             if (e.key >= '1' && e.key <= '9') {
                 const index = parseInt(e.key) - 1;
                 if (index < processes.length) {

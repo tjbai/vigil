@@ -209,6 +209,7 @@ class VigilServer:
         self.logger.info(f'\t- 1-9: Switch tabs')
         self.logger.info(f'\t- Cmd/Ctrl+K: Clear current log')
         self.logger.info(f'\t- Cmd/Ctrl+F: Focus search')
+        self.logger.info(f'\t- Cmd/Ctrl+B: Toggle timestamps')
 
         return runner
 
