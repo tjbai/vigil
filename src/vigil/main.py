@@ -202,14 +202,11 @@ class VigilServer:
         await site.start()
 
         self.logger.info(f'Vigil running at http://localhost:{self.port}')
-        self.logger.info('Available processes:')
-        for proc in self.processes:
-            self.logger.info(f'\t- {proc['name']}')
-        self.logger.info(f'\nKeyboard shortcuts:')
-        self.logger.info(f'\t- 1-9: Switch tabs')
-        self.logger.info(f'\t- Cmd/Ctrl+K: Clear current log')
-        self.logger.info(f'\t- Cmd/Ctrl+F: Focus search')
-        self.logger.info(f'\t- Cmd/Ctrl+B: Toggle timestamps')
+        self.logger.info('\nKeyboard shortcuts:')
+        self.logger.info('\t- 1-9: Switch tabs')
+        self.logger.info('\t- Cmd/Ctrl+K: Clear current log')
+        self.logger.info('\t- Cmd/Ctrl+F: Focus search')
+        self.logger.info('\t- Cmd/Ctrl+B: Toggle timestamps')
 
         return runner
 
