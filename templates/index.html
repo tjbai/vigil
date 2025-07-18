@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vigil - Development Logs Viewer</title>
+    <title>Vigil</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="header">
-        <h1>Vigil</h1>
-        <div class="header-controls">
-            <input type="text" class="search-box" id="searchBox" placeholder="Search logs...">
+    <!-- Popup search overlay -->
+    <div class="search-overlay" id="searchOverlay">
+        <div class="search-popup">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search logs...">
         </div>
     </div>
     
@@ -37,16 +37,25 @@
     <script>
         const processes = {{ processes|tojson }};
         const wsPort = {{ ws_port }};
+        const maxLines = {{ max_lines }};
         
         let activeTab = processes[0].name;
         const logs = {};
-        let showTimestamps = false;
+        let showTimestamps = false;  // Default to hiding timestamps
         let autoscroll = true;
         let searchTerm = '';
+        let lineNumbers = {}; // Track line numbers per process
+        let scrollPositions = {}; // Track scroll positions per process
+        let unreadStatus = {}; // Track unread content per process
+        let initialLoadComplete = {}; // Track if initial load is done per process
         
         // Initialize logs
         processes.forEach(proc => {
             logs[proc.name] = [];
+            lineNumbers[proc.name] = 0;
+            scrollPositions[proc.name] = 0;
+            unreadStatus[proc.name] = false;
+            initialLoadComplete[proc.name] = false;
         });
         
         // Create tabs and log containers
@@ -57,8 +66,7 @@
             // Create tab
             const tab = document.createElement('button');
             tab.className = 'tab';
-            tab.style.setProperty('--tab-color', proc.color);
-            tab.innerHTML = `<span class="tab-indicator"></span>${proc.name}`;
+            tab.innerHTML = `<span class="dirty-indicator" id="dirty-${proc.name}"></span>${proc.name}`;
             tab.onclick = () => switchTab(proc.name);
             tabsContainer.appendChild(tab);
             
@@ -66,18 +74,79 @@
             const logContainer = document.createElement('div');
             logContainer.className = 'log-container';
             logContainer.id = `log-${proc.name}`;
+            
+            // Track scroll position changes
+            logContainer.addEventListener('scroll', () => {
+                if (proc.name === activeTab) {
+                    scrollPositions[proc.name] = logContainer.scrollTop;
+                }
+            });
+            
             contentContainer.appendChild(logContainer);
         });
         
         // Search functionality
-        document.getElementById('searchBox').addEventListener('input', (e) => {
+        const searchOverlay = document.getElementById('searchOverlay');
+        const searchInput = document.getElementById('searchInput');
+        
+        function showSearch() {
+            searchOverlay.classList.add('active');
+            // Small delay to ensure the input is visible before focusing
+            setTimeout(() => {
+                searchInput.focus();
+            }, 50);
+        }
+        
+        function hideSearch() {
+            searchOverlay.classList.remove('active');
+            searchInput.blur();          // make sure focus is gone
+            searchTerm = '';
+            searchInput.value = '';
+            renderCurrentLog();
+        }
+        
+        searchInput.addEventListener('input', (e) => {
             searchTerm = e.target.value.toLowerCase();
             renderCurrentLog();
         });
         
+        // ONE global Esc handler in capture phase
+        document.addEventListener(
+            'keydown',
+            (e) => {
+                if (e.key !== 'Escape') return;
+                if (!searchOverlay.classList.contains('active')) return;
+
+                e.preventDefault();        // stop the default blur/reset
+                e.stopPropagation();       // nothing else should see it
+                hideSearch();              // close immediately
+            },
+            { capture: true }            // run before the input sees it
+        );
+        
+        
+        
+        searchOverlay.addEventListener('click', (e) => {
+            if (e.target === searchOverlay) {
+                hideSearch();
+            }
+        });
+        
         // Switch tab function
         function switchTab(processName) {
+            // Save current scroll position before switching
+            if (activeTab) {
+                const currentContainer = document.getElementById(`log-${activeTab}`);
+                if (currentContainer) {
+                    scrollPositions[activeTab] = currentContainer.scrollTop;
+                }
+            }
+            
             activeTab = processName;
+            
+            // Clear unread status for the tab we're switching to
+            unreadStatus[processName] = false;
+            updateDirtyIndicator(processName);
             
             // Update tabs
             document.querySelectorAll('.tab').forEach((tab, index) => {
@@ -96,6 +165,19 @@
                     container.classList.remove('active');
                 }
             });
+            
+            // Restore scroll position for the new tab, or scroll to bottom if autoscroll is on
+            setTimeout(() => {
+                const newContainer = document.getElementById(`log-${processName}`);
+                if (newContainer) {
+                    if (autoscroll) {
+                        newContainer.scrollTop = newContainer.scrollHeight;
+                        scrollPositions[processName] = newContainer.scrollTop;
+                    } else if (scrollPositions[processName] !== undefined) {
+                        newContainer.scrollTop = scrollPositions[processName];
+                    }
+                }
+            }, 0);
             
             updateLineCount();
         }
@@ -139,34 +221,99 @@
             document.getElementById('lineCount').textContent = `${count} lines`;
         }
         
-        // Render current log
+        // Update dirty indicator for a specific process
+        function updateDirtyIndicator(processName) {
+            const indicator = document.getElementById(`dirty-${processName}`);
+            if (indicator) {
+                if (unreadStatus[processName]) {
+                    indicator.classList.add('active');
+                } else {
+                    indicator.classList.remove('active');
+                }
+            }
+        }
+        
+        // Add single log entry (more efficient for real-time updates)
+        function addLogEntry(processName, entry) {
+            const container = document.getElementById(`log-${processName}`);
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            
+            // Increment line number for this process
+            lineNumbers[processName]++;
+            
+            // Create structure with separate columns
+            const lineNum = lineNumbers[processName].toString().padStart(4, ' ');
+            
+            let content = entry.data;
+            if (searchTerm && content.toLowerCase().includes(searchTerm)) {
+                content = content.replace(new RegExp(searchTerm, 'gi'), match => 
+                    `<span class="highlight">${match}</span>`
+                );
+            }
+            
+            const lineHTML = `
+                <span class="line-number">${lineNum}</span>
+                ${showTimestamps ? `<span class="timestamp">${entry.timestamp}</span>` : ''}
+                <span class="log-content">${content}</span>
+            `;
+            
+            line.innerHTML = lineHTML;
+            container.appendChild(line);
+            
+            // Mark as unread if not the active tab AND initial load is complete
+            if (processName !== activeTab && initialLoadComplete[processName]) {
+                unreadStatus[processName] = true;
+                updateDirtyIndicator(processName);
+            }
+            
+            // Auto-scroll if at bottom
+            if (autoscroll && processName === activeTab) {
+                container.scrollTop = container.scrollHeight;
+                scrollPositions[processName] = container.scrollTop;
+            }
+        }
+        
+        // Render current log (for search/timestamps toggle)
         function renderCurrentLog() {
             const container = document.getElementById(`log-${activeTab}`);
             const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
+            const savedScrollTop = container.scrollTop;
             
             container.innerHTML = '';
             
-            logs[activeTab].forEach(entry => {
+            logs[activeTab].forEach((entry, index) => {
                 const line = document.createElement('div');
                 line.className = 'log-line';
                 
                 let content = entry.data;
-                if (showTimestamps) {
-                    content = `<span class="timestamp">${entry.timestamp}</span>${content}`;
-                }
-                
                 if (searchTerm && content.toLowerCase().includes(searchTerm)) {
                     content = content.replace(new RegExp(searchTerm, 'gi'), match => 
                         `<span class="highlight">${match}</span>`
                     );
                 }
                 
-                line.innerHTML = content;
+                // Create structure with separate columns
+                const lineNum = (index + 1).toString().padStart(4, ' ');
+                
+                const lineHTML = `
+                    <span class="line-number">${lineNum}</span>
+                    ${showTimestamps ? `<span class="timestamp">${entry.timestamp}</span>` : ''}
+                    <span class="log-content">${content}</span>
+                `;
+                
+                line.innerHTML = lineHTML;
                 container.appendChild(line);
             });
             
-            if (autoscroll && (wasAtBottom || searchTerm)) {
+            // Only auto-scroll if user was at bottom and autoscroll is on, or if searching
+            if (autoscroll && wasAtBottom || searchTerm) {
                 container.scrollTop = container.scrollHeight;
+                scrollPositions[activeTab] = container.scrollTop;
+            } else {
+                // Restore previous scroll position
+                container.scrollTop = savedScrollTop;
+                scrollPositions[activeTab] = savedScrollTop;
             }
             
             updateLineCount();
@@ -189,14 +336,36 @@
                 const { process, data } = JSON.parse(event.data);
                 
                 // Add to logs with timestamp
-                logs[process].push({
+                const entry = {
                     timestamp: new Date().toLocaleTimeString(),
                     data: data
-                });
+                };
+                logs[process].push(entry);
                 
-                // Update UI if this is the active tab
+                // Implement rolling window - remove old entries if over max
+                if (logs[process].length > maxLines) {
+                    const removedEntries = logs[process].length - maxLines;
+                    logs[process] = logs[process].slice(removedEntries);
+                    
+                    // Need to re-render the container to remove old DOM elements
+                    if (process === activeTab) {
+                        renderCurrentLog();
+                        return; // Skip addLogEntry since we just re-rendered
+                    } else {
+                        // For inactive tabs, clear and re-render to sync DOM with data
+                        const container = document.getElementById(`log-${process}`);
+                        container.innerHTML = '';
+                        logs[process].forEach(logEntry => addLogEntry(process, logEntry));
+                        return;
+                    }
+                }
+                
+                // Add to UI immediately (more efficient than re-rendering)
+                addLogEntry(process, entry);
+                
+                // Update line count if this is the active tab
                 if (process === activeTab) {
-                    renderCurrentLog();
+                    updateLineCount();
                 }
             };
             
@@ -224,21 +393,34 @@
                         // Split by lines and add timestamps
                         const lines = data.split('\n').filter(l => l);
                         lines.forEach(line => {
-                            logs[proc.name].push({
+                            // Basic ANSI cleanup on frontend too
+                            const cleanLine = line.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+                            const entry = {
                                 timestamp: new Date().toLocaleTimeString(),
-                                data: line + '\n'
-                            });
+                                data: cleanLine + '\n'
+                            };
+                            logs[proc.name].push(entry);
+                            addLogEntry(proc.name, entry);
                         });
                         if (proc.name === activeTab) {
-                            renderCurrentLog();
+                            updateLineCount();
                         }
+                        
+                        // Mark initial load as complete
+                        initialLoadComplete[proc.name] = true;
                     }
                 })
-                .catch(err => console.error('Error loading initial log:', err));
+                .catch(err => {
+                    console.error('Error loading initial log:', err);
+                    // Mark as complete even on error so dirty bits work for future updates
+                    initialLoadComplete[proc.name] = true;
+                });
         });
+        
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            
             if (e.ctrlKey || e.metaKey) {
                 switch(e.key) {
                     case 'k':
@@ -247,7 +429,7 @@
                         break;
                     case 'f':
                         e.preventDefault();
-                        document.getElementById('searchBox').focus();
+                        showSearch();
                         break;
                     case 't':
                         e.preventDefault();

@@ -1,0 +1,16 @@
+*
+
+!src/
+!src/vigil/
+!src/vigil/**.py
+
+!pyproject.toml
+!uv.lock
+!.gitignore
+
+!static/
+!static/styles.css
+
+!templates/
+!templates/index.html
+
