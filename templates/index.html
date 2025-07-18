@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vigil - Development Logs Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Vigil</h1>
+        <div class="header-controls">
+            <input type="text" class="search-box" id="searchBox" placeholder="Search logs...">
+        </div>
+    </div>
+    
+    <div class="tabs" id="tabs"></div>
+    
+    <div class="content" id="content"></div>
+    
+    <div class="status-bar">
+        <div class="connection-status">
+            <div class="connection-indicator" id="connectionIndicator"></div>
+            <span id="connectionText">Connected</span>
+            <span id="lineCount"></span>
+        </div>
+        <div class="controls">
+            <button class="btn" onclick="toggleTimestamps()">Timestamps</button>
+            <button class="btn" onclick="toggleAutoscroll()">
+                <span id="autoscrollText">Autoscroll</span>
+            </button>
+            <button class="btn" onclick="clearCurrentLog()">Clear</button>
+            <button class="btn" onclick="downloadCurrentLog()">Download</button>
+        </div>
+    </div>
+
+    <script>
+        const processes = {{ processes|tojson }};
+        const wsPort = {{ ws_port }};
+        
+        let activeTab = processes[0].name;
+        const logs = {};
+        let showTimestamps = false;
+        let autoscroll = true;
+        let searchTerm = '';
+        
+        // Initialize logs
+        processes.forEach(proc => {
+            logs[proc.name] = [];
+        });
+        
+        // Create tabs and log containers
+        const tabsContainer = document.getElementById('tabs');
+        const contentContainer = document.getElementById('content');
+        
+        processes.forEach(proc => {
+            // Create tab
+            const tab = document.createElement('button');
+            tab.className = 'tab';
+            tab.style.setProperty('--tab-color', proc.color);
+            tab.innerHTML = `<span class="tab-indicator"></span>${proc.name}`;
+            tab.onclick = () => switchTab(proc.name);
+            tabsContainer.appendChild(tab);
+            
+            // Create log container
+            const logContainer = document.createElement('div');
+            logContainer.className = 'log-container';
+            logContainer.id = `log-${proc.name}`;
+            contentContainer.appendChild(logContainer);
+        });
+        
+        // Search functionality
+        document.getElementById('searchBox').addEventListener('input', (e) => {
+            searchTerm = e.target.value.toLowerCase();
+            renderCurrentLog();
+        });
+        
+        // Switch tab function
+        function switchTab(processName) {
+            activeTab = processName;
+            
+            // Update tabs
+            document.querySelectorAll('.tab').forEach((tab, index) => {
+                if (processes[index].name === processName) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+            
+            // Update log containers
+            document.querySelectorAll('.log-container').forEach(container => {
+                if (container.id === `log-${processName}`) {
+                    container.classList.add('active');
+                } else {
+                    container.classList.remove('active');
+                }
+            });
+            
+            updateLineCount();
+        }
+        
+        // Initialize first tab
+        switchTab(activeTab);
+        
+        // Toggle timestamps
+        function toggleTimestamps() {
+            showTimestamps = !showTimestamps;
+            renderCurrentLog();
+        }
+        
+        // Toggle autoscroll
+        function toggleAutoscroll() {
+            autoscroll = !autoscroll;
+            document.getElementById('autoscrollText').textContent = autoscroll ? 'Autoscroll' : 'Manual';
+        }
+        
+        // Clear current log
+        function clearCurrentLog() {
+            logs[activeTab] = [];
+            renderCurrentLog();
+        }
+        
+        // Download current log
+        function downloadCurrentLog() {
+            const logContent = logs[activeTab].map(l => l.data).join('');
+            const blob = new Blob([logContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${activeTab}-${new Date().toISOString()}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Update line count
+        function updateLineCount() {
+            const count = logs[activeTab].length;
+            document.getElementById('lineCount').textContent = `${count} lines`;
+        }
+        
+        // Render current log
+        function renderCurrentLog() {
+            const container = document.getElementById(`log-${activeTab}`);
+            const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
+            
+            container.innerHTML = '';
+            
+            logs[activeTab].forEach(entry => {
+                const line = document.createElement('div');
+                line.className = 'log-line';
+                
+                let content = entry.data;
+                if (showTimestamps) {
+                    content = `<span class="timestamp">${entry.timestamp}</span>${content}`;
+                }
+                
+                if (searchTerm && content.toLowerCase().includes(searchTerm)) {
+                    content = content.replace(new RegExp(searchTerm, 'gi'), match => 
+                        `<span class="highlight">${match}</span>`
+                    );
+                }
+                
+                line.innerHTML = content;
+                container.appendChild(line);
+            });
+            
+            if (autoscroll && (wasAtBottom || searchTerm)) {
+                container.scrollTop = container.scrollHeight;
+            }
+            
+            updateLineCount();
+        }
+        
+        // WebSocket connection
+        let ws;
+        let reconnectTimeout;
+        
+        function connect() {
+            ws = new WebSocket(`ws://localhost:${wsPort}/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('connectionIndicator').classList.remove('disconnected');
+                document.getElementById('connectionText').textContent = 'Connected';
+                clearTimeout(reconnectTimeout);
+            };
+            
+            ws.onmessage = (event) => {
+                const { process, data } = JSON.parse(event.data);
+                
+                // Add to logs with timestamp
+                logs[process].push({
+                    timestamp: new Date().toLocaleTimeString(),
+                    data: data
+                });
+                
+                // Update UI if this is the active tab
+                if (process === activeTab) {
+                    renderCurrentLog();
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('connectionIndicator').classList.add('disconnected');
+                document.getElementById('connectionText').textContent = 'Disconnected';
+                // Reconnect after 2 seconds
+                reconnectTimeout = setTimeout(connect, 2000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        // Initial connection
+        connect();
+        
+        // Load initial logs
+        processes.forEach(proc => {
+            fetch(`/logs/${proc.name}.log`)
+                .then(res => res.text())
+                .then(data => {
+                    if (data) {
+                        // Split by lines and add timestamps
+                        const lines = data.split('\n').filter(l => l);
+                        lines.forEach(line => {
+                            logs[proc.name].push({
+                                timestamp: new Date().toLocaleTimeString(),
+                                data: line + '\n'
+                            });
+                        });
+                        if (proc.name === activeTab) {
+                            renderCurrentLog();
+                        }
+                    }
+                })
+                .catch(err => console.error('Error loading initial log:', err));
+        });
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'k':
+                        e.preventDefault();
+                        clearCurrentLog();
+                        break;
+                    case 'f':
+                        e.preventDefault();
+                        document.getElementById('searchBox').focus();
+                        break;
+                    case 't':
+                        e.preventDefault();
+                        toggleTimestamps();
+                        break;
+                }
+            }
+            
+            // Tab switching with numbers
+            if (e.key >= '1' && e.key <= '9') {
+                const index = parseInt(e.key) - 1;
+                if (index < processes.length) {
+                    e.preventDefault();
+                    switchTab(processes[index].name);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
