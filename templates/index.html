@@ -91,6 +91,10 @@
         
         function showSearch() {
             searchOverlay.classList.add('active');
+            // Clear the input and search term when reopening
+            searchInput.value = '';
+            searchTerm = '';
+            renderCurrentLog(); // Remove highlighting
             // Small delay to ensure the input is visible before focusing
             setTimeout(() => {
                 searchInput.focus();
@@ -100,9 +104,9 @@
         function hideSearch() {
             searchOverlay.classList.remove('active');
             searchInput.blur();          // make sure focus is gone
-            searchTerm = '';
+            // Don't clear searchTerm - keep highlighting
             searchInput.value = '';
-            renderCurrentLog();
+            // Don't re-render - keep current highlighting
         }
         
         searchInput.addEventListener('input', (e) => {
